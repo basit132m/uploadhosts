@@ -37,5 +37,10 @@ function getDb(): PDO
         );
     ");
 
+    // Virtual admin row (id=0) — satisfies FK for uploads owned by the admin account.
+    // Password sentinel can never be submitted through the login form.
+    $pdo->exec("INSERT OR IGNORE INTO users (id, name, password, status, role)
+                VALUES (0, 'Admin', '__system_admin__', 'approved', 'admin')");
+
     return $pdo;
 }

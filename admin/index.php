@@ -21,12 +21,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     exit;
 }
 
-$pending  = $db->query("SELECT * FROM users WHERE status = 'pending'  ORDER BY created_at DESC")->fetchAll();
+$pending  = $db->query("SELECT * FROM users WHERE status = 'pending'  AND id != 0 ORDER BY created_at DESC")->fetchAll();
 $approved = $db->query("SELECT u.*, COUNT(f.id) AS file_count FROM users u
                         LEFT JOIN uploads f ON f.user_id = u.id
-                        WHERE u.status = 'approved'
+                        WHERE u.status = 'approved' AND u.id != 0
                         GROUP BY u.id ORDER BY u.created_at DESC")->fetchAll();
-$rejected = $db->query("SELECT * FROM users WHERE status = 'rejected' ORDER BY created_at DESC")->fetchAll();
+$rejected = $db->query("SELECT * FROM users WHERE status = 'rejected' AND id != 0 ORDER BY created_at DESC")->fetchAll();
 
 $totalFiles = (int)$db->query("SELECT COUNT(*) FROM uploads")->fetchColumn();
 $totalSize  = (int)$db->query("SELECT COALESCE(SUM(file_size),0) FROM uploads")->fetchColumn();
