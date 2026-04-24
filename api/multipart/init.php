@@ -26,11 +26,18 @@ $ext  = pathinfo($filename, PATHINFO_EXTENSION);
 $safe = substr(preg_replace('/[^a-zA-Z0-9._-]/', '_', pathinfo($filename, PATHINFO_FILENAME)), 0, 60);
 $key  = date('Y/m/d') . '/' . bin2hex(random_bytes(8)) . '_' . $safe . ($ext ? '.' . $ext : '');
 
-$uploadId = r2_create_multipart($key, $mimeType);
+// Call R2 directly so we can surface the actual error
+[$r2Status, $r2Body] = r2_request('POST', $key, 'uploads', '', $mimeType);
+
+$xml      = $r2Status === 200 ? @simplexml_load_string($r2Body) : false;
+$uploadId = $xml ? (string)$xml->UploadId : null;
 
 if (!$uploadId) {
     http_response_code(500);
-    echo json_encode(['error' => 'Failed to initiate upload on R2']);
+    $detail = $r2Status === 0
+        ? 'cURL failed — outbound requests may be blocked on this host'
+        : "R2 returned HTTP {$r2Status}: " . substr(strip_tags($r2Body), 0, 300);
+    echo json_encode(['error' => $detail]);
     exit;
 }
 
