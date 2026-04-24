@@ -157,7 +157,8 @@ function r2_presign_part(string $key, string $uploadId, int $partNumber): string
 /** Initiate a multipart upload, returns uploadId or null on failure. */
 function r2_create_multipart(string $key, string $contentType): ?string
 {
-    [$status, $body] = r2_request('POST', $key, 'uploads', '', $contentType);
+    // S3 SigV4 requires sub-resources as "key=" (empty value) in canonical query string
+    [$status, $body] = r2_request('POST', $key, 'uploads=', '', $contentType);
     if ($status !== 200) return null;
 
     $xml = @simplexml_load_string($body);

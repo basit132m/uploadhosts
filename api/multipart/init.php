@@ -27,7 +27,7 @@ $safe = substr(preg_replace('/[^a-zA-Z0-9._-]/', '_', pathinfo($filename, PATHIN
 $key  = date('Y/m/d') . '/' . bin2hex(random_bytes(8)) . '_' . $safe . ($ext ? '.' . $ext : '');
 
 // Call R2 directly so we can surface the actual error
-[$r2Status, $r2Body] = r2_request('POST', $key, 'uploads', '', $mimeType);
+[$r2Status, $r2Body] = r2_request('POST', $key, 'uploads=', '', $mimeType);
 
 $xml      = $r2Status === 200 ? @simplexml_load_string($r2Body) : false;
 $uploadId = $xml ? (string)$xml->UploadId : null;
