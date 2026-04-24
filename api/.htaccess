@@ -1,0 +1,7 @@
+# Allow only sign.php to be accessed; block directory listing
+Options -Indexes
+
+<FilesMatch "^(?!sign\.php$).*\.php$">
+  Order allow,deny
+  Deny from all
+</FilesMatch>
