@@ -93,18 +93,26 @@ async function uploadSimple(file, card) {
   }
 
   setBadge(card, 'uploading', 'Uploading…');
+  const tracker = makeSpeedTracker();
 
   await new Promise(resolve => {
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', signData.uploadUrl, true);
     xhr.setRequestHeader('Content-Type', mime(file));
     xhr.upload.addEventListener('progress', ev => {
-      if (ev.lengthComputable) setBar(card, ev.loaded / ev.total * 100);
+      if (ev.lengthComputable) {
+        setBar(card, ev.loaded / ev.total * 100);
+        tracker.update(ev.loaded);
+        const bps = tracker.getBytesPerSec();
+        const remaining = file.size - ev.loaded;
+        setPartInfo(card, bps > 1000 ? `${formatSpeed(bps)} · ${formatETA(remaining, bps)}` : '');
+      }
     });
     xhr.addEventListener('load', async () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         setBar(card, 100);
         setBadge(card, 'done', 'Done');
+        setPartInfo(card, '');
         showLink(card, signData.publicUrl);
         await saveRecord(file, signData.key, signData.publicUrl);
       } else {
@@ -157,6 +165,7 @@ async function uploadMultipart(file, card) {
   });
 
   setBadge(card, 'uploading', 'Uploading…');
+  const tracker = makeSpeedTracker();
 
   // Upload each part sequentially
   for (let n = 1; n <= totalParts; n++) {
@@ -189,7 +198,7 @@ async function uploadMultipart(file, card) {
     for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
       if (aborted) return;
       try {
-        etag = await uploadPart(chunk, partUrl, completedParts.length, n, totalParts, file.size, card);
+        etag = await uploadPart(chunk, partUrl, completedParts.length, n, totalParts, file.size, card, tracker);
         break;
       } catch (e) {
         if (attempt === MAX_RETRY) {
@@ -232,13 +241,20 @@ async function uploadMultipart(file, card) {
 }
 
 // Upload one part via XHR, resolve with ETag string
-function uploadPart(chunk, url, doneCount, partNum, totalParts, fileSize, card) {
+function uploadPart(chunk, url, doneCount, partNum, totalParts, fileSize, card, tracker) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', url, true);
     xhr.upload.addEventListener('progress', ev => {
-      if (ev.lengthComputable)
+      if (ev.lengthComputable) {
         updatePartProgress(card, null, doneCount, totalParts, fileSize, ev.loaded, CHUNK);
+        const totalDone = doneCount * CHUNK + ev.loaded;
+        tracker.update(totalDone);
+        const bps = tracker.getBytesPerSec();
+        const remaining = fileSize - totalDone;
+        const speedStr = bps > 1000 ? ` · ${formatSpeed(bps)} · ${formatETA(remaining, bps)}` : '';
+        setPartInfo(card, `Part ${partNum} of ${totalParts}${speedStr}`);
+      }
     });
     xhr.addEventListener('load', () => {
       if (xhr.status >= 200 && xhr.status < 300) {
@@ -255,9 +271,49 @@ function uploadPart(chunk, url, doneCount, partNum, totalParts, fileSize, card) 
 }
 
 function updatePartProgress(card, completedParts, doneCount, totalParts, fileSize, currentBytes = 0, chunkSize = CHUNK) {
-  const doneBytes  = doneCount * chunkSize;
-  const pct        = Math.min(99, Math.round((doneBytes + currentBytes) / fileSize * 100));
+  const doneBytes = doneCount * chunkSize;
+  const pct       = Math.min(99, Math.round((doneBytes + currentBytes) / fileSize * 100));
   setBar(card, pct);
+}
+
+// ── Speed & ETA helpers ───────────────────────────────────────────────────────
+function makeSpeedTracker() {
+  const samples = [];
+  const WINDOW  = 8000; // 8-second rolling window
+
+  return {
+    update(totalBytes) {
+      const now = Date.now();
+      samples.push({ t: now, b: totalBytes });
+      const cutoff = now - WINDOW;
+      while (samples.length > 1 && samples[0].t < cutoff) samples.shift();
+    },
+    getBytesPerSec() {
+      if (samples.length < 2) return 0;
+      const oldest = samples[0];
+      const newest = samples[samples.length - 1];
+      const dt = (newest.t - oldest.t) / 1000;
+      if (dt < 0.1) return 0;
+      return (newest.b - oldest.b) / dt;
+    },
+  };
+}
+
+function formatSpeed(bps) {
+  if (bps < 1024)    return bps.toFixed(0) + ' B/s';
+  if (bps < 1048576) return (bps / 1024).toFixed(1) + ' KB/s';
+  return (bps / 1048576).toFixed(1) + ' MB/s';
+}
+
+function formatETA(remainingBytes, bps) {
+  if (bps < 1000) return '';
+  const secs = remainingBytes / bps;
+  if (secs < 5)    return 'almost done';
+  if (secs < 60)   return `~${Math.ceil(secs)}s left`;
+  if (secs < 3600) return `~${Math.ceil(secs / 60)}min left`;
+  const h = Math.floor(secs / 3600);
+  const m = Math.ceil((secs % 3600) / 60);
+  return `~${h}h ${m}min left`;
 }
 
 // ── Database record ───────────────────────────────────────────────────────────
