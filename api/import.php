@@ -1,4 +1,8 @@
 <?php
+// Suppress PHP notices/warnings so they never corrupt our JSON output
+ini_set('display_errors', '0');
+error_reporting(0);
+
 require_once __DIR__ . '/../includes/auth.php';
 require_once __DIR__ . '/../includes/r2.php';
 
@@ -15,17 +19,17 @@ $url      = trim($body['url']      ?? '');
 $filename = trim($body['filename'] ?? '');
 
 if (!$url) { http_response_code(400); echo json_encode(['error' => 'url required']); exit; }
-if (!filter_var($url, FILTER_VALIDATE_URL)) {
-    http_response_code(400); echo json_encode(['error' => 'Invalid URL']); exit;
-}
 
+// FILTER_VALIDATE_URL rejects many valid URLs (percent-encoded paths, long tokens, etc.)
+// Use a simple scheme+host check instead
 $scheme = strtolower(parse_url($url, PHP_URL_SCHEME) ?: '');
-if (!in_array($scheme, ['http', 'https'], true)) {
-    http_response_code(400); echo json_encode(['error' => 'Only http/https URLs are supported']); exit;
+$host   = parse_url($url, PHP_URL_HOST) ?: '';
+
+if (!in_array($scheme, ['http', 'https'], true) || $host === '') {
+    http_response_code(400); echo json_encode(['error' => 'Invalid URL — must start with http:// or https://']); exit;
 }
 
 // Basic SSRF guard — block private/loopback addresses
-$host = parse_url($url, PHP_URL_HOST) ?: '';
 if (preg_match('/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|\[::1\])/i', $host)) {
     http_response_code(400); echo json_encode(['error' => 'Private/local URLs are not allowed']); exit;
 }
@@ -46,18 +50,24 @@ $contentType   = curl_getinfo($hch, CURLINFO_CONTENT_TYPE) ?: 'application/octet
 $effectiveUrl  = curl_getinfo($hch, CURLINFO_EFFECTIVE_URL) ?: $url;
 curl_close($hch);
 
-// Strip charset suffix from content-type (e.g. "text/html; charset=utf-8" → "text/html")
+// Strip charset suffix from content-type
 $contentType = trim(preg_replace('/;.*$/', '', $contentType)) ?: 'application/octet-stream';
 
 // Derive filename from URL path if not provided
 if ($filename === '') {
-    $path     = parse_url($effectiveUrl, PHP_URL_PATH) ?: '';
+    $path     = urldecode(parse_url($effectiveUrl, PHP_URL_PATH) ?: '');
     $filename = basename($path) ?: 'imported-file';
-    // Strip query-string noise that sometimes leaks into basename
-    $filename = preg_replace('/\?.*$/', '', $filename);
+    $filename = preg_replace('/\?.*$/', '', $filename); // strip stray query noise
 }
 
-// Sanitize display filename (keep spaces, common punctuation)
+// Also check the ?filename= query param of the original URL as fallback
+if ($filename === 'imported-file' || $filename === '') {
+    $qs = [];
+    parse_str(parse_url($url, PHP_URL_QUERY) ?: '', $qs);
+    if (!empty($qs['filename'])) $filename = basename($qs['filename']);
+}
+
+// Sanitize display filename (keep spaces and common punctuation)
 $filename = trim(preg_replace('/[^\w.\- ]/', '_', $filename));
 if ($filename === '') $filename = 'imported-file';
 
@@ -88,8 +98,8 @@ if ($contentLength > 0 && $contentLength <= $chunkSize) {
         CURLOPT_TIMEOUT        => 300,
         CURLOPT_USERAGENT      => 'Mozilla/5.0 (compatible; UploadHost/1.0)',
     ]);
-    $data     = curl_exec($dch);
-    $curlErr  = curl_error($dch);
+    $data    = curl_exec($dch);
+    $curlErr = curl_error($dch);
     curl_close($dch);
 
     if ($data === false || $data === '') {
