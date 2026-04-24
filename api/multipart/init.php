@@ -1,6 +1,6 @@
 <?php
-require_once __DIR__ . '/../includes/auth.php';
-require_once __DIR__ . '/../includes/r2.php';
+require_once __DIR__ . '/../../includes/auth.php';
+require_once __DIR__ . '/../../includes/r2.php';
 
 header('Content-Type: application/json');
 
@@ -21,12 +21,21 @@ if ($fileSize > $maxBytes) {
     exit;
 }
 
-$ext = pathinfo($filename, PATHINFO_EXTENSION);
+// Generate unique key
+$ext  = pathinfo($filename, PATHINFO_EXTENSION);
 $safe = substr(preg_replace('/[^a-zA-Z0-9._-]/', '_', pathinfo($filename, PATHINFO_FILENAME)), 0, 60);
 $key  = date('Y/m/d') . '/' . bin2hex(random_bytes(8)) . '_' . $safe . ($ext ? '.' . $ext : '');
 
+$uploadId = r2_create_multipart($key, $mimeType);
+
+if (!$uploadId) {
+    http_response_code(500);
+    echo json_encode(['error' => 'Failed to initiate upload on R2']);
+    exit;
+}
+
 echo json_encode([
-    'uploadUrl' => r2_presign_put($key),
-    'publicUrl' => rtrim(R2_PUBLIC_BASE_URL, '/') . '/' . $key,
+    'uploadId'  => $uploadId,
     'key'       => $key,
+    'publicUrl' => rtrim(R2_PUBLIC_BASE_URL, '/') . '/' . $key,
 ]);

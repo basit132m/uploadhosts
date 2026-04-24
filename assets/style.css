@@ -207,6 +207,12 @@ header p {
   word-break: break-all;
   margin-top: 4px;
 }
+.file-part-info {
+  font-size: .75rem;
+  color: var(--muted);
+  margin-top: 2px;
+  min-height: 1em;
+}
 
 /* ── Clear all ───────────────────────────────────────────────────────────── */
 #clear-btn {

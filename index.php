@@ -31,7 +31,7 @@ $user = currentUser();
       <h2>Drag &amp; drop files here</h2>
       <p>or click to browse your device</p>
       <span class="browse-btn">Browse files</span>
-      <p class="limits">Up to 500 MB per file &nbsp;·&nbsp; Multiple files supported</p>
+      <p class="limits">Up to 10 GB per file &nbsp;·&nbsp; Auto-resumes if connection drops</p>
     </div>
 
     <div id="file-list"></div>
