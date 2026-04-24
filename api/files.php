@@ -50,5 +50,28 @@ if ($action === 'delete') {
     exit;
 }
 
+// ── Rename a file (display name only, R2 key unchanged) ──────────────────────
+if ($action === 'rename') {
+    $fileId  = (int)($body['id']       ?? 0);
+    $newName = trim($body['filename']  ?? '');
+
+    if (!$fileId || $newName === '') {
+        http_response_code(400); echo json_encode(['error' => 'Missing id or filename']); exit;
+    }
+
+    $newName = trim(preg_replace('/[^\w.\- ]/', '_', $newName));
+    if ($newName === '') {
+        http_response_code(400); echo json_encode(['error' => 'Invalid filename']); exit;
+    }
+
+    $stmt = $db->prepare("SELECT id FROM uploads WHERE id = ? AND user_id = ?");
+    $stmt->execute([$fileId, $user['id']]);
+    if (!$stmt->fetch()) { http_response_code(404); echo json_encode(['error' => 'Not found']); exit; }
+
+    $db->prepare("UPDATE uploads SET filename = ? WHERE id = ? AND user_id = ?")->execute([$newName, $fileId, $user['id']]);
+    echo json_encode(['ok' => true, 'filename' => $newName]);
+    exit;
+}
+
 http_response_code(400);
 echo json_encode(['error' => 'Unknown action']);

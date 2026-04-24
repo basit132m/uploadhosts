@@ -36,6 +36,24 @@ $user = currentUser();
 
     <div id="file-list"></div>
     <button id="clear-btn">Clear all</button>
+
+    <!-- URL Import -->
+    <div class="import-box">
+      <div class="import-header">
+        <span class="import-icon">🔗</span>
+        <div>
+          <h3>Import from URL</h3>
+          <p>Paste a direct download link — we'll fetch it straight to your storage</p>
+        </div>
+      </div>
+      <div class="import-fields">
+        <input type="url" id="import-url" class="form-input"
+               placeholder="https://example.com/file.zip" autocomplete="off" />
+        <input type="text" id="import-name" class="form-input"
+               placeholder="Rename file (optional)" autocomplete="off" />
+        <button id="import-btn" class="btn btn-primary">Import file</button>
+      </div>
+    </div>
   </main>
 
   <script>

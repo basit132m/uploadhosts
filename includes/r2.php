@@ -28,8 +28,9 @@ function _r2_signing_key(string $date): string
 /**
  * Execute a signed server-side request to R2 via cURL.
  * Returns [httpStatusCode, responseBody].
+ * Pass an array reference as $responseHeaders to capture raw response headers.
  */
-function r2_request(string $method, string $key, string $query, string $body = '', string $contentType = ''): array
+function r2_request(string $method, string $key, string $query, string $body = '', string $contentType = '', &$responseHeaders = null): array
 {
     $host        = _r2_host();
     $uri         = _r2_uri($key);
@@ -88,6 +89,14 @@ function r2_request(string $method, string $key, string $query, string $body = '
         CURLOPT_TIMEOUT        => 60,
     ]);
     if ($body !== '') curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+
+    if ($responseHeaders !== null) {
+        $responseHeaders = [];
+        curl_setopt($ch, CURLOPT_HEADERFUNCTION, function ($ch, $header) use (&$responseHeaders) {
+            $responseHeaders[] = $header;
+            return strlen($header);
+        });
+    }
 
     $response   = curl_exec($ch);
     $statusCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -194,4 +203,27 @@ function r2_delete_object(string $key): bool
 {
     [$status] = r2_request('DELETE', $key, '');
     return $status >= 200 && $status < 300;
+}
+
+/**
+ * Upload a chunk of data directly from the server as one multipart part.
+ * Used for server-side URL imports. Returns the ETag string or null on failure.
+ */
+function r2_upload_part_server(string $key, string $uploadId, int $partNumber, string $data): ?string
+{
+    $params = ['partNumber' => (string)$partNumber, 'uploadId' => $uploadId];
+    ksort($params);
+    $query = http_build_query($params, '', '&', PHP_QUERY_RFC3986);
+
+    $headers = [];
+    [$status] = r2_request('PUT', $key, $query, $data, '', $headers);
+
+    if ($status < 200 || $status >= 300) return null;
+
+    foreach ($headers as $h) {
+        if (stripos($h, 'ETag:') === 0) {
+            return trim(substr($h, 5));
+        }
+    }
+    return null;
 }

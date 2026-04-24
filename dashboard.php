@@ -82,6 +82,11 @@ function phpFormatSize(int $bytes): string {
                       data-url="<?= htmlspecialchars($file['public_url']) ?>">
                 Copy link
               </button>
+              <button class="btn btn-sm btn-outline rename-db-btn"
+                      data-id="<?= $file['id'] ?>"
+                      data-name="<?= htmlspecialchars($file['filename']) ?>">
+                Rename
+              </button>
               <button class="btn btn-sm btn-danger delete-db-btn"
                       data-id="<?= $file['id'] ?>"
                       data-key="<?= htmlspecialchars($file['r2_key']) ?>">
