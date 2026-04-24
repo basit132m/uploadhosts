@@ -348,7 +348,10 @@ async function importFromUrl() {
 
   try {
     const res  = await postJSON('/api/import.php', { url, filename: name });
-    const data = await res.json();
+    const text = await res.text();
+    let data;
+    try { data = JSON.parse(text); }
+    catch { throw new Error(text.trim().substring(0, 200) || `Empty response from server (HTTP ${res.status})`); }
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
 
     card.querySelector('.progress-bar').classList.remove('indeterminate');
