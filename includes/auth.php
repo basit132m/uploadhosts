@@ -6,6 +6,17 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+/**
+ * Returns a versioned asset URL that busts cache whenever the file changes.
+ * Works from any subdirectory depth.
+ */
+function asset(string $path): string
+{
+    $file = rtrim($_SERVER['DOCUMENT_ROOT'], '/') . $path;
+    $v    = file_exists($file) ? filemtime($file) : 0;
+    return $path . '?v=' . $v;
+}
+
 function currentUser(): ?array
 {
     return $_SESSION['uh_user'] ?? null;
