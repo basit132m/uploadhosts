@@ -214,45 +214,6 @@ header p {
   min-height: 1em;
 }
 
-/* ── Import box ──────────────────────────────────────────────────────────── */
-.import-box {
-  width: 100%;
-  max-width: 680px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 22px 26px;
-  margin-top: 24px;
-}
-.import-header {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  margin-bottom: 16px;
-}
-.import-icon { font-size: 1.6rem; line-height: 1; flex-shrink: 0; }
-.import-header h3 { font-size: 1rem; font-weight: 600; margin-bottom: 3px; }
-.import-header p  { font-size: .825rem; color: var(--muted); }
-.import-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.import-fields .btn { align-self: flex-start; }
-
-/* ── Indeterminate progress bar ──────────────────────────────────────────── */
-@keyframes progress-indeterminate {
-  0%   { left: -40%; }
-  60%  { left: 100%; }
-  100% { left: 100%; }
-}
-.progress-wrap { position: relative; overflow: hidden; }
-.progress-bar.indeterminate {
-  position: absolute;
-  width: 40% !important;
-  animation: progress-indeterminate 1.6s ease-in-out infinite;
-}
-
 /* ── Clear all ───────────────────────────────────────────────────────────── */
 #clear-btn {
   display: none;

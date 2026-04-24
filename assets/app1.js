@@ -19,9 +19,6 @@ const dropzone  = document.getElementById('dropzone');
 const fileInput = document.getElementById('file-input');
 const fileList  = document.getElementById('file-list');
 const clearBtn  = document.getElementById('clear-btn');
-const importBtn = document.getElementById('import-btn');
-const importUrl = document.getElementById('import-url');
-const importName = document.getElementById('import-name');
 
 ['dragenter', 'dragover'].forEach(e =>
   dropzone.addEventListener(e, ev => { ev.preventDefault(); dropzone.classList.add('drag-over'); })
@@ -32,8 +29,6 @@ const importName = document.getElementById('import-name');
 dropzone.addEventListener('drop', ev => handleFiles(ev.dataTransfer.files));
 fileInput.addEventListener('change', () => { handleFiles(fileInput.files); fileInput.value = ''; });
 clearBtn.addEventListener('click', () => { fileList.innerHTML = ''; clearBtn.style.display = 'none'; });
-importBtn.addEventListener('click', importFromUrl);
-importUrl.addEventListener('keydown', e => { if (e.key === 'Enter') importFromUrl(); });
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 function handleFiles(fileSet) {
@@ -319,59 +314,6 @@ function formatETA(remainingBytes, bps) {
   const h = Math.floor(secs / 3600);
   const m = Math.ceil((secs % 3600) / 60);
   return `~${h}h ${m}min left`;
-}
-
-// ── URL Import ────────────────────────────────────────────────────────────────
-async function importFromUrl() {
-  const url  = importUrl.value.trim();
-  const name = importName.value.trim();
-
-  if (!url) { importUrl.focus(); return; }
-
-  importBtn.disabled = true;
-  importBtn.textContent = 'Importing…';
-  clearBtn.style.display = 'inline-block';
-
-  const card = document.createElement('div');
-  card.className = 'file-card';
-  card.innerHTML = `
-    <span class="file-icon">🔗</span>
-    <div class="file-info">
-      <div class="file-name" title="${esc(name || url)}">${esc(name || url)}</div>
-      <div class="file-meta">Fetching from URL…</div>
-      <div class="file-part-info">Server is downloading &amp; uploading — this may take a while</div>
-      <div class="progress-wrap"><div class="progress-bar indeterminate"></div></div>
-    </div>
-    <span class="badge badge-uploading">Importing</span>
-  `;
-  fileList.prepend(card);
-
-  try {
-    const res  = await postJSON('/api/import.php', { url, filename: name });
-    const text = await res.text();
-    let data;
-    try { data = JSON.parse(text); }
-    catch { throw new Error(text.trim().substring(0, 200) || `Empty response from server (HTTP ${res.status})`); }
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-
-    card.querySelector('.progress-bar').classList.remove('indeterminate');
-    setBar(card, 100);
-    setBadge(card, 'done', 'Done');
-    card.querySelector('.file-name').textContent = data.filename;
-    card.querySelector('.file-name').title = data.filename;
-    card.querySelector('.file-meta').textContent = formatSize(data.fileSize);
-    setPartInfo(card, '');
-    showLink(card, data.publicUrl);
-
-    importUrl.value  = '';
-    importName.value = '';
-  } catch (e) {
-    card.querySelector('.progress-bar').classList.remove('indeterminate');
-    fail(card, 'Import failed', e.message);
-  } finally {
-    importBtn.disabled = false;
-    importBtn.textContent = 'Import file';
-  }
 }
 
 // ── Database record ───────────────────────────────────────────────────────────
