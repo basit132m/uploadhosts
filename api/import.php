@@ -47,21 +47,16 @@ if (preg_match('/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|
     http_response_code(400); echo json_encode(['error' => 'Private/local URLs are not allowed']); exit;
 }
 
-// ── Realistic browser headers that bypass bot checks ──────────────────────────
-$browserHeaders = [
-    'Accept: */*',
+// ── Browser-like cURL options ─────────────────────────────────────────────────
+$browserUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+$browserHdrs = [
+    'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language: en-US,en;q=0.9',
     'Accept-Encoding: identity',
     'Connection: keep-alive',
 ];
-$browserUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
-// ── Probe the URL: try HEAD first, fall back to ranged GET ───────────────────
-//    Many download hosts block HEAD or return misleading info.
-//    A ranged GET (bytes=0-0) follows all HTTP redirects and reveals
-//    the real Content-Type and Content-Length without downloading the file.
-
-function _curl_base(string $url, string $ua, array $hdrs): \CurlHandle|false
+function _mk_curl(string $url, string $ua, array $hdrs, int $timeout = 30)
 {
     $ch = curl_init($url);
     curl_setopt_array($ch, [
@@ -69,7 +64,7 @@ function _curl_base(string $url, string $ua, array $hdrs): \CurlHandle|false
         CURLOPT_MAXREDIRS      => 10,
         CURLOPT_AUTOREFERER    => true,
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 30,
+        CURLOPT_TIMEOUT        => $timeout,
         CURLOPT_SSL_VERIFYPEER => false,
         CURLOPT_USERAGENT      => $ua,
         CURLOPT_HTTPHEADER     => $hdrs,
@@ -77,70 +72,110 @@ function _curl_base(string $url, string $ua, array $hdrs): \CurlHandle|false
     return $ch;
 }
 
-function _is_html(string $ct): bool
+// Check body content — catches Cloudflare regardless of Content-Type header
+function _body_is_html(string $body): bool
 {
-    return str_contains($ct, 'text/html') || str_contains($ct, 'application/xhtml');
+    $s = ltrim($body);
+    return stripos($s, '<!DOCTYPE html') !== false
+        || stripos($s, '<html')          !== false;
 }
 
-// Step 1: HEAD
-$ch = _curl_base($url, $browserUA, $browserHeaders);
+function _body_is_cloudflare(string $body): bool
+{
+    return stripos($body, 'cloudflare')         !== false
+        || stripos($body, 'DDoS protection')    !== false
+        || stripos($body, 'cf-ray')             !== false
+        || stripos($body, 'just a moment')      !== false
+        || stripos($body, 'challenge-platform') !== false;
+}
+
+function _ct_is_html(string $ct): bool
+{
+    return strpos($ct, 'text/html') !== false || strpos($ct, 'application/xhtml') !== false;
+}
+
+// ── Probe: HEAD then ranged GET to get Content-Type, size, and a body sample ──
+// We fetch the first 4 KB so we can inspect the body for HTML/Cloudflare even
+// when the server sends a misleading Content-Type header.
+$probe = '';          // body sample
+$contentType   = '';
+$contentLength = 0;
+$effectiveUrl  = $url;
+
+// Step 1: HEAD (fast)
+$ch = _mk_curl($url, $browserUA, $browserHdrs);
 curl_setopt($ch, CURLOPT_NOBODY, true);
 curl_exec($ch);
-$headStatus  = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-$contentType = trim(preg_replace('/;.*$/', '', curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?: '')) ?: '';
+$headStatus    = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+$contentType   = trim(preg_replace('/;.*$/', '', curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?: ''));
 $contentLength = (int)curl_getinfo($ch, CURLINFO_CONTENT_LENGTH_DOWNLOAD);
 $effectiveUrl  = curl_getinfo($ch, CURLINFO_EFFECTIVE_URL) ?: $url;
 $headErr       = curl_error($ch);
 curl_close($ch);
 
-// Step 2: fall back to ranged GET if HEAD failed or returned HTML
-$usedRangeProbe = false;
-if ($headErr || $headStatus < 200 || $headStatus >= 400 || _is_html($contentType) || $contentType === '') {
-    $ch = _curl_base($effectiveUrl ?: $url, $browserUA, array_merge($browserHeaders, ['Range: bytes=0-0']));
-    $rangeBody = curl_exec($ch);
-    $rangeStatus  = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $rangeCT      = trim(preg_replace('/;.*$/', '', curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?: '')) ?: '';
-    $effectiveUrl = curl_getinfo($ch, CURLINFO_EFFECTIVE_URL) ?: $effectiveUrl ?: $url;
-    $rangeErr     = curl_error($ch);
+// Step 2: small GET to capture body sample + response headers
+// (always run this — HEAD alone can't tell us if the body is HTML)
+$capturedHdrs = [];
+$ch = _mk_curl($effectiveUrl, $browserUA, array_merge($browserHdrs, ['Range: bytes=0-4095']));
+curl_setopt($ch, CURLOPT_HEADERFUNCTION, function ($c, $h) use (&$capturedHdrs) {
+    $capturedHdrs[] = $h;
+    return strlen($h);
+});
+$probe        = (string)curl_exec($ch);
+$probeStatus  = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+$probeCT      = trim(preg_replace('/;.*$/', '', curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?: ''));
+$effectiveUrl = curl_getinfo($ch, CURLINFO_EFFECTIVE_URL) ?: $effectiveUrl;
+$probeErr     = curl_error($ch);
+curl_close($ch);
 
-    // Parse total size from Content-Range: bytes 0-0/TOTAL
-    $rangeHeaders = [];
-    curl_setopt($ch, CURLOPT_HEADERFUNCTION, function ($ch, $h) use (&$rangeHeaders) {
-        $rangeHeaders[] = $h; return strlen($h);
-    });
-    curl_close($ch);
+// Prefer probe results (more accurate than HEAD)
+if ($probeCT !== '') $contentType = $probeCT;
 
-    if (!$rangeErr && $rangeStatus >= 200 && $rangeStatus < 400) {
-        if ($rangeCT !== '') $contentType   = $rangeCT;
-        // Re-probe with header capture to get Content-Range total
-        $ch2 = _curl_base($effectiveUrl, $browserUA, array_merge($browserHeaders, ['Range: bytes=0-0']));
-        $captured = [];
-        curl_setopt($ch2, CURLOPT_HEADERFUNCTION, function ($c, $h) use (&$captured) {
-            $captured[] = $h; return strlen($h);
-        });
-        curl_exec($ch2);
-        curl_close($ch2);
-        foreach ($captured as $h) {
-            // Content-Range: bytes 0-0/12345678
-            if (preg_match('/^Content-Range:\s*bytes\s+\d+-\d+\/(\d+)/i', $h, $m)) {
-                $contentLength = (int)$m[1];
-            }
-            if ($contentType === '' && preg_match('/^Content-Type:\s*(.+)/i', $h, $m)) {
-                $contentType = trim(preg_replace('/;.*$/', '', $m[1]));
-            }
-        }
+// Extract total size from Content-Range: bytes 0-4095/TOTAL
+foreach ($capturedHdrs as $h) {
+    if (preg_match('/^Content-Range:\s*bytes\s+\d+-\d+\/(\d+)/i', $h, $m)) {
+        $contentLength = (int)$m[1];
+        break;
     }
-    $usedRangeProbe = true;
 }
 
-// If we still have HTML content-type after probing, the URL is a webpage, not a file
-if (_is_html($contentType)) {
-    http_response_code(422);
-    echo json_encode(['error' => 'URL leads to a webpage, not a downloadable file. The link may have expired or requires a browser session.']);
+// If range not supported, try Content-Length from probe response
+if ($contentLength <= 0) {
+    foreach ($capturedHdrs as $h) {
+        if (preg_match('/^Content-Length:\s*(\d+)/i', $h, $m)) {
+            $contentLength = (int)$m[1];
+            break;
+        }
+    }
+}
+
+if ($probeErr && $headErr) {
+    http_response_code(502);
+    echo json_encode(['error' => 'Cannot reach URL: ' . ($probeErr ?: $headErr)]);
     exit;
 }
 
-// Derive filename: caller-supplied → ?filename= param → URL path
+// ── HTML / Cloudflare detection ───────────────────────────────────────────────
+// Check BOTH the Content-Type header AND the actual body content.
+// Cloudflare sometimes sends challenge pages with non-HTML content-type.
+if (_ct_is_html($contentType) || _body_is_html($probe)) {
+    http_response_code(422);
+    if (_body_is_cloudflare($probe)) {
+        echo json_encode(['error' =>
+            'Cloudflare is blocking the download from our server. ' .
+            'The site requires a real browser (JavaScript challenge). ' .
+            'Download the file in Chrome and upload it directly instead.'
+        ]);
+    } else {
+        echo json_encode(['error' =>
+            'URL leads to a webpage, not a downloadable file. ' .
+            'The link may have expired or require a browser login session.'
+        ]);
+    }
+    exit;
+}
+
+// ── Derive filename ───────────────────────────────────────────────────────────
 if ($filename === '') {
     $qs = [];
     parse_str(parse_url($url, PHP_URL_QUERY) ?: '', $qs);
@@ -154,12 +189,13 @@ if ($filename === '') {
 $filename = trim(preg_replace('/[^\w.\- ]/', '_', $filename));
 if ($filename === '') $filename = 'imported-file';
 
-// Guess MIME type from extension if server returned generic type
+// Guess MIME from extension when server gives generic type
 if ($contentType === '' || $contentType === 'application/octet-stream') {
     $extMap = [
-        'zip' => 'application/zip', 'rar' => 'application/vnd.rar',
+        'zip' => 'application/zip',      'rar' => 'application/vnd.rar',
+        '7z'  => 'application/x-7z-compressed',
+        'iso' => 'application/x-iso9660-image',
         'nsp' => 'application/octet-stream', 'xci' => 'application/octet-stream',
-        'iso' => 'application/x-iso9660-image', '7z' => 'application/x-7z-compressed',
         'mp4' => 'video/mp4', 'mkv' => 'video/x-matroska',
         'pdf' => 'application/pdf',
     ];
@@ -186,7 +222,7 @@ $chunkSize = 10 * 1024 * 1024; // 10 MB
 
 // ── Small file (known size ≤ 10 MB): single PUT ────────────────────────────
 if ($contentLength > 0 && $contentLength <= $chunkSize) {
-    $dch = _curl_base($effectiveUrl, $browserUA, $browserHeaders);
+    $dch     = _mk_curl($effectiveUrl, $browserUA, $browserHdrs, 300);
     $data    = curl_exec($dch);
     $curlErr = curl_error($dch);
     curl_close($dch);
@@ -194,6 +230,16 @@ if ($contentLength > 0 && $contentLength <= $chunkSize) {
     if ($data === false || $data === '') {
         http_response_code(500);
         echo json_encode(['error' => 'Download failed: ' . ($curlErr ?: 'empty response')]);
+        exit;
+    }
+
+    // Body check again on the actual download
+    if (_body_is_html($data)) {
+        http_response_code(422);
+        echo json_encode(['error' => _body_is_cloudflare($data)
+            ? 'Cloudflare blocked the download from our server. Download the file in Chrome and upload it directly.'
+            : 'Downloaded content is an HTML page, not a file.'
+        ]);
         exit;
     }
 
@@ -221,15 +267,29 @@ if ($contentLength > 0 && $contentLength <= $chunkSize) {
     $failed    = false;
     $errMsg    = '';
     $totalRead = 0;
+    $firstChunk = true;
 
-    $dch = _curl_base($effectiveUrl, $browserUA, $browserHeaders);
+    $dch = _mk_curl($effectiveUrl, $browserUA, $browserHdrs, 0);
     curl_setopt($dch, CURLOPT_TIMEOUT, 0);
     curl_setopt($dch, CURLOPT_RETURNTRANSFER, false);
     curl_setopt($dch, CURLOPT_WRITEFUNCTION, function ($ch, $chunk) use (
-        &$buffer, &$parts, &$partNum, &$failed, &$errMsg, &$totalRead,
+        &$buffer, &$parts, &$partNum, &$failed, &$errMsg, &$totalRead, &$firstChunk,
         $key, $uploadId, $chunkSize
     ) {
         if ($failed) return -1;
+
+        // Check the very first bytes for HTML/Cloudflare
+        if ($firstChunk) {
+            $firstChunk = false;
+            if (_body_is_html($chunk)) {
+                $failed = true;
+                $errMsg = _body_is_cloudflare($chunk)
+                    ? 'Cloudflare blocked the download from our server. Download the file in Chrome and upload it directly.'
+                    : 'Server returned an HTML page instead of the file.';
+                return -1;
+            }
+        }
+
         $buffer    .= $chunk;
         $totalRead += strlen($chunk);
 
@@ -252,23 +312,24 @@ if ($contentLength > 0 && $contentLength <= $chunkSize) {
     $curlErr = curl_error($dch);
     curl_close($dch);
 
+    if ($failed || $curlErr) {
+        r2_abort_multipart($key, $uploadId);
+        http_response_code($failed ? 422 : 500);
+        echo json_encode(['error' => $errMsg ?: "Download error: {$curlErr}"]);
+        exit;
+    }
+
     // Upload remaining buffer as final part
-    if (!$failed && $buffer !== '') {
+    if ($buffer !== '') {
         $partNum++;
         $etag = r2_upload_part_server($key, $uploadId, $partNum, $buffer);
         if (!$etag) {
-            $failed = true;
-            $errMsg = 'R2 final part upload failed';
-        } else {
-            $parts[] = ['partNumber' => $partNum, 'etag' => $etag];
+            r2_abort_multipart($key, $uploadId);
+            http_response_code(500);
+            echo json_encode(['error' => 'R2 final part upload failed']);
+            exit;
         }
-    }
-
-    if ($failed || $curlErr) {
-        r2_abort_multipart($key, $uploadId);
-        http_response_code(500);
-        echo json_encode(['error' => $errMsg ?: "Download error: {$curlErr}"]);
-        exit;
+        $parts[] = ['partNumber' => $partNum, 'etag' => $etag];
     }
 
     if (empty($parts)) {
