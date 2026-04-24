@@ -124,11 +124,24 @@ async function uploadFile(file, card) {
       }
     });
 
-    xhr.addEventListener('load', () => {
+    xhr.addEventListener('load', async () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         bar.style.width = '100%';
         setBadge(badge, 'done', 'Done');
         appendCopyLink(info, signData.publicUrl);
+        // Save record to DB
+        await fetch('/api/files.php', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'save',
+            filename: file.name,
+            key: signData.key,
+            publicUrl: signData.publicUrl,
+            fileSize: file.size,
+            mimeType: file.type || 'application/octet-stream',
+          }),
+        });
       } else {
         setBadge(badge, 'error', `Upload failed (${xhr.status})`);
         bar.style.background = 'var(--error)';

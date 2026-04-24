@@ -1,24 +1,29 @@
+<?php
+require_once __DIR__ . '/includes/auth.php';
+requireAuth();
+$user = currentUser();
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>UploadHost — Fast File Sharing</title>
-  <meta name="description" content="Upload files instantly and share links. Powered by Cloudflare R2." />
+  <title>Upload — UploadHost</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>☁️</text></svg>" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="assets/style.css" />
+  <link rel="stylesheet" href="/assets/style.css" />
 </head>
 <body>
 
-  <header>
-    <h1>☁️ UploadHost</h1>
-    <p>Drop files. Get links. Zero fuss.</p>
-  </header>
+  <?php require __DIR__ . '/includes/nav.php'; ?>
 
-  <main style="width:100%;max-width:680px">
+  <main class="main-content">
+    <div class="page-header">
+      <h2>Upload Files</h2>
+      <p>Files go directly to Cloudflare R2 — fast &amp; secure.</p>
+    </div>
 
     <div class="dropzone" id="dropzone">
       <input type="file" id="file-input" multiple />
@@ -30,15 +35,13 @@
     </div>
 
     <div id="file-list"></div>
-
     <button id="clear-btn">Clear all</button>
-
   </main>
 
-  <footer>
-    <p>Files stored securely on <a href="https://cloudflare.com/r2" target="_blank" rel="noopener">Cloudflare R2</a> &nbsp;·&nbsp; <a href="https://uploadhost.site">uploadhost.site</a></p>
-  </footer>
+  <script>
+    const CURRENT_USER_ID = <?= (int)$user['id'] ?>;
+  </script>
+  <script src="/assets/app.js"></script>
 
-  <script src="assets/app.js"></script>
 </body>
 </html>
